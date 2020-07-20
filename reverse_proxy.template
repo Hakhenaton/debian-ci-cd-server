@@ -1,0 +1,31 @@
+upstream backend_drone {{
+    server 127.0.0.1:{drone_port};
+}}
+
+upstream backend_portainer {{
+    server 127.0.0.1:{portainer_port};
+}}
+
+server {{
+    listen       80 default_server;
+    server_name  {main_host};
+    return 444;
+}}
+
+server {{
+    listen 80;
+    server_name {drone_host};
+
+    location / {{
+            proxy_pass http://backend_drone;
+    }}
+}}
+
+server {{
+    listen 80;
+    server_name {portainer_host};
+
+    location / {{
+            proxy_pass http://backend_portainer;
+    }}
+}}
