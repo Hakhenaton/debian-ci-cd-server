@@ -6,10 +6,17 @@ upstream backend_portainer {{
     server 127.0.0.1:{portainer_port};
 }}
 
+upstream backend_cv {{
+    server 127.0.0.1:{cv_port};
+}}
+
 server {{
     listen       80 default_server;
     server_name  {main_host};
-    return 444;
+
+    location / {{
+        proxy_pass http://backend_cv;
+    }}
 }}
 
 server {{
