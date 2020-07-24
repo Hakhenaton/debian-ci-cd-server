@@ -8,7 +8,7 @@ class ProxyBackend:
         self.host = host
         self.port = port
 
-def install_drone (connection: Connection, host: str, port: str, client_id: str, client_secret: str, admin_token: str):
+def install_drone (connection: Connection, host: str, port: str, client_id: str, client_secret: str, admin_user: str, admin_token: str):
 
     install_folder = "/opt/drone"
 
@@ -42,12 +42,15 @@ def install_drone (connection: Connection, host: str, port: str, client_id: str,
     drone_env(key='DRONE_RPC_SECRET', value=rpc_secret.stdout)
 
     drone_env(key='DRONE_REGISTRATION_CLOSED', value='true')
-    drone_env(key='DRONE_USER_CREATE', value='username:admin,machine:false,admin:true,token:%s' % admin_token)
+    drone_env(
+        key='DRONE_USER_CREATE', 
+        value='username:{user},machine:false,admin:true,token:{token}'
+            .format(user=admin_user, token=admin_token))
 
     # docker-compose contains both drone and docker-runner
     c.put("/root/drone.docker-compose.yml", "/tmp/drone.docker-compose.yml")
     c.sudo("mv /tmp/drone.docker-compose.yml %s/docker-compose.yml" % install_folder)
-    c.sudo("docker-compose -f %s/docker-compose.yml down" % install_folder)
+    c.sudo("docker-compose -f %s/docker-compose.yml down --remove-orphans" % install_folder)
     c.sudo("docker-compose -f %s/docker-compose.yml up -d" % install_folder)
 
     # download and install exec runner binary
@@ -232,21 +235,15 @@ def configure_ssh (connection: Connection, user: str):
     c.sudo("mv /tmp/sshd_config /etc/ssh/sshd_config")
     c.sudo("systemctl restart sshd")
 
-def configure_firewall (connection: Connection):
+def configure_firewall (connection: Connection, container_ports = [str]):
 
     c.sudo("apt-get install -y ufw")
 
     c.sudo("ufw default deny incoming")
     c.sudo("ufw default deny outgoing")
 
-    container_ports = [
-        "9000",
-        "9001",
-        "9002"
-    ]
-
-    for port in in_ports:
-        c.sudo("ufw allow from 127.0.0.1 to 127.0.0.1 port {port} proto tcp".format(port=port))
+    for port in container_ports:
+        c.sudo("ufw allow out from 172.0.0.0/8 to 172.0.0.0/8 port {port} proto tcp".format(port=port))
 
     # incoming allowed traffic
     in_ports = [ 
@@ -261,9 +258,10 @@ def configure_firewall (connection: Connection):
 
     # outgoing allowed traffic
     out_ports = [
-        "dns",
+        "dns/tcp",
+        "dns/udp",
         "http/tcp",
-        "https/tcp" 
+        "https/tcp"
     ]
 
     for port in out_ports:
@@ -295,6 +293,7 @@ if __name__ == "__main__":
         drone_github_client_id = os.environ['DRONE_GITHUB_CLIENT_ID']
         drone_github_client_secret = os.environ['DRONE_GITHUB_CLIENT_SECRET']
         drone_admin_token = os.environ['DRONE_ADMIN_TOKEN']
+        drone_admin_user = os.environ['DRONE_ADMIN_USER']
 
         # Portainer config
         portainer_host = os.environ['PORTAINER_SERVER_HOST']
@@ -328,6 +327,7 @@ if __name__ == "__main__":
             port=drone_server_port,
             client_id=drone_github_client_id,
             client_secret=drone_github_client_secret,
+            admin_user=drone_admin_user,
             admin_token=drone_admin_token
         )
 
@@ -335,7 +335,11 @@ if __name__ == "__main__":
 
         configure_ssh(connection=c, user=user_to_add)
 
-        configure_firewall(connection=c)
+        configure_firewall(connection=c, container_ports=[ 
+            drone_server_port, 
+            portainer_port, 
+            cv_port 
+            ])
 
         # clean all temp files
         c.sudo("rm -rf /tmp/*")
